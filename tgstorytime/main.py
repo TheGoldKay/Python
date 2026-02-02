@@ -1,13 +1,13 @@
 from playwright.sync_api import sync_playwright
-import os, json
+import os, json, time
 
 # Where to save all downloaded EPUBs
-DOWNLOAD_DIR = "downloads"
+DOWNLOAD_DIR = "V:\TG_STORY_TIME"
 os.makedirs(DOWNLOAD_DIR, exist_ok=True)
 
 OFFSET = 0 # start at frist page
 STEP = 127 # each steap is a new web page
-LIMIT = 6477 # a grand total of 51 steps
+LIMIT = 6477 # a grand total of 51 steps + one last page with less than 127 novels
 URL = "https://tgstorytime.com/browse.php?type=titles&offset={}" # listing all titles
 NOVEL_LINK = "https://tgstorytime.com/{}" # link to each title given the id
 HOME_PAGE = "https://tgstorytime.com/index.php" # log in first
@@ -20,25 +20,31 @@ load -> Page “fully” loaded: DOM, scripts, images, stylesheets, etc. Fires w
 networkidle -> No network activity for ~500 ms (often never on busy sites).
 """
 
-def pages():
-    for offset in range(OFFSET, LIMIT + 1, STEP):
-        yield URL.format(offset) 
+TITLES = dict[int, str] # the sid (story id) and the title
 
-def get_page_sids(page, offset=OFFSET): # sid = story id
+def get_novel_urls(page): # sid = story id
     #page.goto(URL.format(offset + STEP * 10), wait_until="load", timeout=60_000)
     #page.goto(URL.format(offset + STEP * 10), wait_until="networkidle", timeout=60_000)
-    page.goto(URL.format(offset + STEP * 20), wait_until="domcontentloaded")
-    #anchors = page.locator("a[href]")
-    anchors = page.locator("div.title a[href^='viewstory.php?sid=']") 
     titles = []
-    for i in range(anchors.count()):
-        link = anchors.nth(i).get_attribute("href")
-        #print(link, i)
-        titles.append(NOVEL_LINK.format(link))
-        #if link and link.startswith("viewstory.php?sid="):
-            #link = link.split("=")[1]
-            #sid = int(''.join(filter(str.isdigit, link)))
-            #titles.add(sid)
+    p = 1
+    for offset in range(OFFSET, LIMIT + 1, STEP):
+        page.goto(URL.format(offset), wait_until="domcontentloaded")
+        #anchors = page.locator("a[href]")
+        anchors = page.locator("div.title a[href^='viewstory.php?sid=']") 
+        novels = []
+        for i in range(anchors.count()):
+            link = anchors.nth(i).get_attribute("href")
+            #print(link, i)
+            novels.append(NOVEL_LINK.format(link))
+            #if link and link.startswith("viewstory.php?sid="):
+                #link = link.split("=")[1]
+                #sid = int(''.join(filter(str.isdigit, link)))
+                #titles.add(sid)
+        if p < 52: assert len(novels) == STEP, f"\nExpected {STEP} novels, got {len(novels)} -> OFFSET: {offset}\n"
+        titles.extend(novels)
+        #print(f"Page Count: {p}\n")
+        p += 1
+        #download_all_epubs(page, novels)
     return titles
 
 def login(page):
@@ -59,19 +65,38 @@ def login(page):
     page.get_by_role("button", name="Go").click()
     #page.click('input[type="submit"][value="Go"]')
 
-def download_epub(page, novel_url):
-    page.goto(NOVEL_LINK.format(novel_url), wait_until="load")
-    with page.expect_download() as download_info:
-        page.locator('a[href*="epubversion/epubs/"][href$=".epub"]').filter(has_text="Story").click()
-    d = download_info.value
-    path = os.path.join(DOWNLOAD_DIR, d.suggested_filename)
-    d.save_as(path)
-    return path
+def download_epub(page, novel_url, timeout=15_000):
+    """Returns path on success, None if download failed (e.g. server error)."""
+    try:
+        page.goto(novel_url, wait_until="domcontentloaded")
+        base = page.locator('a[href*="epubversion/epubs/"][href$=".epub"]')
+        epub_link = base.filter(has_text="Story").or_(base.filter(has_text="Download ePub"))
+        try:
+            with page.expect_download(timeout=timeout) as download_info:
+                epub_link.click()
+        except Exception as e:
+            print(f"  FAILED (no download): {novel_url} - {e}")
+            return None
+        d = download_info.value
+        path = os.path.join(DOWNLOAD_DIR, d.suggested_filename)
+        d.save_as(path)
+        return path
+    except:
+        return None
+
+def download_all_epubs(page, titles):
+    failed = 0
+    for title in titles:
+        #print(f"Downloading: {title}")
+        path = download_epub(page, title)
+        if not path:
+            failed += 1
+    return failed
 
 def run():
     with sync_playwright() as p:
         # Launch browser (headless=True for invisible browser)
-        browser = p.chromium.launch(headless=False)
+        browser = p.chromium.launch(headless=True)
 
         # Create a new context with a download directory
         context = browser.new_context(
@@ -80,10 +105,20 @@ def run():
         page = context.new_page()
         login(page)
         #page.goto(URL.format(STEP * 22))
-        titles = get_page_sids(page)
-        print(f"Titles Count: {len(titles)}") #TODO: Creat test to check if it's return exactly 127 links (except for the last page)
-        #path = download_epub(page, 7753)
+        start = time.time()
+        titles = get_novel_urls(page)
+        failed = download_all_epubs(page, titles)
+        end = time.time()
+        total_min = (end - start)/60
+        total_sec = int((total_min - int(total_min)) * 60)
+        print(f"\nTime taken: {int(total_min)} minute and {total_sec} seconds")
+        print(f"Total Novel Count: {len(titles)}\n") #TODO: Creat test to check if it's return exactly 127 links (except for the last page)
+        print(f"\nFailed Downloads: {failed}\n")
+        #print(f"Frist Title: {titles[0]}")
+        #time.sleep(1)
+        #path = download_epub(page, titles[0])
         #print(f"Saved: {path}")
+        #time.sleep(3)
         #page.goto(get_page_url(OFFSET), wait_until="networkidle")
         #ids = get_story_ids(page)
         #print(f"Total Titles: {len(ids)}") # must me 127
