@@ -42,7 +42,7 @@ def get_novel_urls(page): # sid = story id
                 #titles.add(sid)
         if p < 52: assert len(novels) == STEP, f"\nExpected {STEP} novels, got {len(novels)} -> OFFSET: {offset}\n"
         titles.extend(novels)
-        #print(f"Page Count: {p}\n")
+        print(f"Page Count: {p}")
         p += 1
         #download_all_epubs(page, novels)
     return titles
@@ -85,13 +85,19 @@ def download_epub(page, novel_url, timeout=15_000):
         return None
 
 def download_all_epubs(page, titles):
-    failed = 0
+    failed = []
+    success = 0
     for title in titles:
         #print(f"Downloading: {title}")
         path = download_epub(page, title)
         if not path:
-            failed += 1
-    return failed
+            failed.append(title)
+        else:
+            success += 1
+    print(f"Total Novel Count: {success}\n")
+    print(f"\nFailed Downloads: {len(failed)}\n")
+    with open("failed.json", "w") as f:
+        json.dump(failed, f)
 
 def run():
     with sync_playwright() as p:
@@ -104,24 +110,13 @@ def run():
         )
         page = context.new_page()
         login(page)
-        #page.goto(URL.format(STEP * 22))
         start = time.time()
         titles = get_novel_urls(page)
-        failed = download_all_epubs(page, titles)
+        download_all_epubs(page, titles)
         end = time.time()
         total_min = (end - start)/60
         total_sec = int((total_min - int(total_min)) * 60)
-        print(f"\nTime taken: {int(total_min)} minute and {total_sec} seconds")
-        print(f"Total Novel Count: {len(titles)}\n") #TODO: Creat test to check if it's return exactly 127 links (except for the last page)
-        print(f"\nFailed Downloads: {failed}\n")
-        #print(f"Frist Title: {titles[0]}")
-        #time.sleep(1)
-        #path = download_epub(page, titles[0])
-        #print(f"Saved: {path}")
-        #time.sleep(3)
-        #page.goto(get_page_url(OFFSET), wait_until="networkidle")
-        #ids = get_story_ids(page)
-        #print(f"Total Titles: {len(ids)}") # must me 127
+        print(f"\n\n\nTime taken: {int(total_min)} minute and {total_sec} seconds")
 
         browser.close()
 
