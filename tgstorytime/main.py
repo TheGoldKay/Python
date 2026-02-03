@@ -65,7 +65,7 @@ def login(page):
     page.get_by_role("button", name="Go").click()
     #page.click('input[type="submit"][value="Go"]')
 
-def download_epub(page, novel_url, timeout=15_000):
+def download_epub(page, novel_url, timeout=15_000): # timeout -> 1000 = 1s
     """Returns path on success, None if download failed (e.g. server error)."""
     try:
         # removed wait_until="domcontentloaded" because it's timing out constantly
@@ -73,7 +73,7 @@ def download_epub(page, novel_url, timeout=15_000):
         page.goto(novel_url)
         base = page.locator('a[href*="epubversion/epubs/"][href$=".epub"]')
         epub_link = base.filter(has_text="Story").or_(base.filter(has_text="Download ePub"))
-        epub_link.wait_for(state="visible")
+        epub_link.wait_for(state="visible", timeout=timeout)
         with page.expect_download(timeout=timeout) as download_info:
             epub_link.click()
         d = download_info.value
