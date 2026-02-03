@@ -68,20 +68,20 @@ def login(page):
 def download_epub(page, novel_url, timeout=15_000):
     """Returns path on success, None if download failed (e.g. server error)."""
     try:
-        page.goto(novel_url, wait_until="domcontentloaded")
+        # removed wait_until="domcontentloaded" because it's timing out constantly
+        # now the script will wait till what's important appear
+        page.goto(novel_url)
         base = page.locator('a[href*="epubversion/epubs/"][href$=".epub"]')
         epub_link = base.filter(has_text="Story").or_(base.filter(has_text="Download ePub"))
-        try:
-            with page.expect_download(timeout=timeout) as download_info:
-                epub_link.click()
-        except Exception as e:
-            print(f"  FAILED (no download): {novel_url} - {e}")
-            return None
+        epub_link.wait_for(state="visible")
+        with page.expect_download(timeout=timeout) as download_info:
+            epub_link.click()
         d = download_info.value
         path = os.path.join(DOWNLOAD_DIR, d.suggested_filename)
         d.save_as(path)
         return path
-    except:
+    except Exception as e:
+        print(f" ---->>> FAILED (no download): {novel_url} - {e} <<<----")
         return None
 
 def download_all_epubs(page, titles):
@@ -94,8 +94,8 @@ def download_all_epubs(page, titles):
             failed.append(title)
         else:
             success += 1
-    print(f"Total Novel Count: {success}\n")
-    print(f"\nFailed Downloads: {len(failed)}\n")
+    print(f"\n\nTotal Novel Count: {success}")
+    print(f"Failed Downloads: {len(failed)}\n")
     with open("failed.json", "w") as f:
         json.dump(failed, f)
 
