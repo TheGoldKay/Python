@@ -1,5 +1,7 @@
 from playwright.sync_api import sync_playwright
+from pathlib import Path
 import os, json, time
+
 
 # Where to save all downloaded EPUBs
 DOWNLOAD_DIR = "V:\TG_STORY_TIME"
@@ -11,40 +13,71 @@ LIMIT = 6477 # a grand total of 51 steps + one last page with less than 127 nove
 URL = "https://tgstorytime.com/browse.php?type=titles&offset={}" # listing all titles
 NOVEL_LINK = "https://tgstorytime.com/{}" # link to each title given the id
 HOME_PAGE = "https://tgstorytime.com/index.php" # log in first
+DOWNLOAD_LOCATOR_TIMEOUT = 40_000
+DOWNLOAD_EVENT_TIMEOUT = 60_000
 
 """
+                                            PROJECT NOTES
 Rough loading order:
 
 domcontentloaded -> HTML parsed, DOM tree ready. Scripts have run. Images/styles may still be loading.
 load -> Page “fully” loaded: DOM, scripts, images, stylesheets, etc. Fires when the load event happens.
 networkidle -> No network activity for ~500 ms (often never on busy sites).
+
+First Run: 04/02/2026 - TG Storytime has 6574 stories from 2006 authors
+
+Total Novel Count (counted by the script): 6.329
+Total Novel Count (listed on folder): 6.286
+Failed Downloads Counter: 245
+Time Taken (in minutes): 399
+
+Note 1: 43 titles not accounted for as "failed downloads", investigation needed
+
+Error 1: Timeout waiting for download event -> The click happens but no window pops up to save (page loads forever)
+Error 2: Timeout waiting for selector of download to be visible -> No ePub available, manual scraping necessary 
 """
 
-TITLES = dict[int, str] # the sid (story id) and the title
+def find_empty_epubs(root_folder: str):
+    """
+    Just checking if there are any empty/blank files
+    """
+    root_path = Path(root_folder)
+
+
+    print(f"\nScanning for empty .epub files under: {root_folder}\n")
+    smallest = float('inf')
+    smallest_name = ""
+    for dirpath, _, filenames in os.walk(root_path):
+        for filename in filenames:
+            if filename.lower().endswith(".epub"):
+                full_path = Path(dirpath) / filename
+                try:
+                    size = full_path.stat().st_size
+                    if size < smallest:
+                        smallest = size
+                        smallest_name = filename
+                except OSError as e:
+                    print(f"Could not read {full_path}: {e}")
+                    continue
+
+                if size == 0:
+                    print(filename)
+    print(f"Smallest File: {smallest_name} - {smallest/1024:.2f} KB\n")
 
 def get_novel_urls(page): # sid = story id
-    #page.goto(URL.format(offset + STEP * 10), wait_until="load", timeout=60_000)
-    #page.goto(URL.format(offset + STEP * 10), wait_until="networkidle", timeout=60_000)
     titles = []
     p = 1
     for offset in range(OFFSET, LIMIT + 1, STEP):
         page.goto(URL.format(offset), wait_until="domcontentloaded")
-        #anchors = page.locator("a[href]")
         anchors = page.locator("div.title a[href^='viewstory.php?sid=']") 
         novels = []
         for i in range(anchors.count()):
             link = anchors.nth(i).get_attribute("href")
-            #print(link, i)
             novels.append(NOVEL_LINK.format(link))
-            #if link and link.startswith("viewstory.php?sid="):
-                #link = link.split("=")[1]
-                #sid = int(''.join(filter(str.isdigit, link)))
-                #titles.add(sid)
         if p < 52: assert len(novels) == STEP, f"\nExpected {STEP} novels, got {len(novels)} -> OFFSET: {offset}\n"
         titles.extend(novels)
         print(f"Page Count: {p}")
         p += 1
-        #download_all_epubs(page, novels)
     return titles
 
 def login(page):
@@ -64,6 +97,7 @@ def login(page):
     # <input type="submit" class="button" name="submit" value="Go">
     page.get_by_role("button", name="Go").click()
     #page.click('input[type="submit"][value="Go"]')
+    print("\nLogged In Successfully\n")
 
 def download_epub(page, novel_url, timeout=15_000): # timeout -> 1000 = 1s
     """Returns path on success, None if download failed (e.g. server error)."""
@@ -73,22 +107,22 @@ def download_epub(page, novel_url, timeout=15_000): # timeout -> 1000 = 1s
         page.goto(novel_url)
         base = page.locator('a[href*="epubversion/epubs/"][href$=".epub"]')
         epub_link = base.filter(has_text="Story").or_(base.filter(has_text="Download ePub"))
-        epub_link.wait_for(state="visible", timeout=timeout)
-        with page.expect_download(timeout=timeout) as download_info:
-            epub_link.click()
+        epub_link.wait_for(state="visible", timeout=DOWNLOAD_LOCATOR_TIMEOUT)
+        with page.expect_download(timeout=DOWNLOAD_EVENT_TIMEOUT) as download_info:
+            # .click() also has timeout argument, but it's a fast event, so there is no need to set a higher timeout
+            epub_link.click() 
         d = download_info.value
         path = os.path.join(DOWNLOAD_DIR, d.suggested_filename)
         d.save_as(path)
         return path
     except Exception as e:
-        print(f" ---->>> FAILED (no download): {novel_url} - {e} <<<----")
+        print(f"---+++>>> FAILED (no download): {novel_url} - {e} <<<+++---")
         return None
 
 def download_all_epubs(page, titles):
     failed = []
     success = 0
     for title in titles:
-        #print(f"Downloading: {title}")
         path = download_epub(page, title)
         if not path:
             failed.append(title)
@@ -96,7 +130,7 @@ def download_all_epubs(page, titles):
             success += 1
     print(f"\n\nTotal Novel Count: {success}")
     print(f"Failed Downloads: {len(failed)}\n")
-    with open("failed.json", "w") as f:
+    with open("failed_downloads.json", "w") as f:
         json.dump(failed, f)
 
 def run():
@@ -115,11 +149,12 @@ def run():
         download_all_epubs(page, titles)
         end = time.time()
         total_min = (end - start)/60
-        total_sec = int((total_min - int(total_min)) * 60)
-        print(f"\n\n\nTime taken: {int(total_min)} minute and {total_sec} seconds")
+        print(f"\n\n\nTime taken: {int(total_min)} minutes")
 
         browser.close()
 
 
 if __name__ == "__main__":
-    run()
+    #run()
+    print("\n----------------- START ----------------------")
+    find_empty_epubs("V:\TG_STORY_TIME")
