@@ -243,18 +243,14 @@ def manual_download(page, title):
         options = chapter_select.locator('option')
         option_count = options.count()
         
-        # Extract novel title from the page for file naming
-        # Try to get a title from the page, fallback to URL-based name
-        try:
-            novel_title = page.locator('h1, h2, .title, title').first.inner_text(timeout=5000)
-            # Clean title for filename
-            novel_title = "".join(c for c in novel_title if c.isalnum() or c in (' ', '-', '_')).strip()
-            novel_title = novel_title[:100]  # Limit length
-            print("\nUSED LOCATOR\n")
-        except:
-            # Fallback: use part of URL or a default name
-            novel_title = title.split('/')[-1].split('?')[0] or "novel"
-            novel_title = "".join(c for c in novel_title if c.isalnum() or c in (' ', '-', '_')).strip()
+        # Extract novel title from div.pagetitle: novel name (viewstory.php link) + author (viewuser.php link)
+        pagetitle = page.locator('#pagetitle')
+        novel_name = pagetitle.locator('a[href*="viewstory.php?sid="]').inner_text()
+        author = pagetitle.locator('a[href*="viewuser.php?uid="]').inner_text()
+        novel_title = f"{novel_name} - {author}"
+        # Clean title for filename
+        novel_title = "".join(c for c in novel_title if c.isalnum() or c in (' ', '-', '_')).strip()
+
         #COUNTER = COUNTER + 1
         #novel_title = f"{COUNTER} {novel_title}"
         # Create directory for this novel's chapters
@@ -375,7 +371,8 @@ def manual_download(page, title):
 def run():
     with sync_playwright() as p:
         # Launch browser (headless=True for invisible browser)
-        browser = p.chromium.launch(headless=False)
+        #browser = p.chromium.launch(headless=False)
+        browser = p.firefox.launch(headless=False)
 
         # Create a new context with a download directory
         context = browser.new_context(
