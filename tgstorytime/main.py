@@ -1,7 +1,8 @@
-from logging import ERROR
 from playwright.sync_api import sync_playwright
 from pathlib import Path
-import os, json, time
+import os
+import json
+import time
 
 
 # Where to save all downloaded EPUBs
@@ -9,12 +10,12 @@ DOWNLOAD_DIR = "V:\TG_FINAL"
 TG_MANUAL_DOWNLOAD = DOWNLOAD_DIR
 os.makedirs(DOWNLOAD_DIR, exist_ok=True)
 
-OFFSET = 0 # start at frist page
-STEP = 127 # each steap is a new web page
-LIMIT = 6477 # a grand total of 51 steps + one last page with less than 127 novels
-URL = "https://tgstorytime.com/browse.php?type=titles&offset={}" # listing all titles
-NOVEL_LINK = "https://tgstorytime.com/{}" # link to each title given the id
-HOME_PAGE = "https://tgstorytime.com/index.php" # log in first
+OFFSET = 0  # start at frist page
+STEP = 127  # each steap is a new web page
+LIMIT = 6477  # a grand total of 51 steps + one last page with less than 127 novels
+URL = "https://tgstorytime.com/browse.php?type=titles&offset={}"  # listing all titles
+NOVEL_LINK = "https://tgstorytime.com/{}"  # link to each title given the id
+HOME_PAGE = "https://tgstorytime.com/index.php"  # log in first
 DOWNLOAD_LOCATOR_TIMEOUT = 40_000
 DOWNLOAD_EVENT_TIMEOUT = 60_000
 
@@ -85,6 +86,7 @@ ERRORS = []
 DOWNLOAD_OK = []
 COUNTER = 0
 
+
 def count_novels():
     auto = Path(DOWNLOAD_DIR)
     manual = Path(TG_MANUAL_DOWNLOAD)
@@ -100,7 +102,7 @@ def count_novels():
     s = set(novels)
     print(f"Novels Counter {len(novels)}")
     print(f"Set Counter: {len(s)}")
-    print(f"Diff: {abs(len(novels)-len(s))}")
+    print(f"Diff: {abs(len(novels) - len(s))}")
 
 
 def get_name(novel):
@@ -109,15 +111,15 @@ def get_name(novel):
         name = name[1:]
     return name
 
+
 def find_empty_epubs(root_folder: str):
     """
     Just checking if there are any empty/blank files
     """
     root_path = Path(root_folder)
 
-
     print(f"\nScanning for empty .epub files under: {root_folder}\n")
-    smallest = float('inf')
+    smallest = float("inf")
     smallest_name = ""
     for dirpath, _, filenames in os.walk(root_path):
         for filename in filenames:
@@ -134,23 +136,28 @@ def find_empty_epubs(root_folder: str):
 
                 if size == 0:
                     print(filename)
-    print(f"Smallest File: {smallest_name} - {smallest/1024:.2f} KB\n")
+    print(f"Smallest File: {smallest_name} - {smallest / 1024:.2f} KB\n")
 
-def get_novel_urls(page): # sid = story id
+
+def get_novel_urls(page):  # sid = story id
     titles = []
     p = 1
     for offset in range(OFFSET, LIMIT + 1, STEP):
         page.goto(URL.format(offset), wait_until="domcontentloaded")
-        anchors = page.locator("div.title a[href^='viewstory.php?sid=']") 
+        anchors = page.locator("div.title a[href^='viewstory.php?sid=']")
         novels = []
         for i in range(anchors.count()):
             link = anchors.nth(i).get_attribute("href")
             novels.append(NOVEL_LINK.format(link))
-        if p < 52: assert len(novels) == STEP, f"\nExpected {STEP} novels, got {len(novels)} -> OFFSET: {offset}\n"
+        if p < 52:
+            assert len(novels) == STEP, (
+                f"\nExpected {STEP} novels, got {len(novels)} -> OFFSET: {offset}\n"
+            )
         titles.extend(novels)
         print(f"Page Count: {p}")
         p += 1
     return titles
+
 
 def login(page):
     page.goto(HOME_PAGE, wait_until="load")
@@ -164,30 +171,33 @@ def login(page):
     # <input type="text" class="textbox" name="penname" id="penname" size="15">
     page.fill("#penname", user)
     # <input type="password" class="textbox" name="password" id="password" size="15">
-    #page.fill("#password", password)
+    # page.fill("#password", password)
     page.get_by_role("textbox", name="password").fill(password)
     # <input type="submit" class="button" name="submit" value="Go">
     page.get_by_role("button", name="Go").click()
-    #page.click('input[type="submit"][value="Go"]')
+    # page.click('input[type="submit"][value="Go"]')
     print("\nLogged In Successfully\n")
 
-def download_epub(page, novel_url, timeout=15_000): # timeout -> 1000 = 1s
+
+def download_epub(page, novel_url, timeout=15_000):  # timeout -> 1000 = 1s
     """Returns path on success, None if download failed (e.g. server error)."""
-    #global COUNTER
+    # global COUNTER
     try:
         # removed wait_until="domcontentloaded" because it's timing out constantly
         # now the script will wait till what's important appear
         page.goto(novel_url)
         base = page.locator('a[href*="epubversion/epubs/"][href$=".epub"]')
-        epub_link = base.filter(has_text="Story").or_(base.filter(has_text="Download ePub"))
+        epub_link = base.filter(has_text="Story").or_(
+            base.filter(has_text="Download ePub")
+        )
         epub_link.wait_for(state="visible", timeout=DOWNLOAD_LOCATOR_TIMEOUT)
         with page.expect_download(timeout=DOWNLOAD_EVENT_TIMEOUT) as download_info:
             # .click() also has timeout argument, but it's a fast event, so there is no need to set a higher timeout
-            epub_link.click() 
+            epub_link.click()
         author = page.locator('a[href*="viewuser.php?uid="]').inner_text()
         d = download_info.value
-        #file_name = f"7912 {d.suggested_filename}"
-        #COUNTER = COUNTER + 1
+        # file_name = f"7912 {d.suggested_filename}"
+        # COUNTER = COUNTER + 1
         title = d.suggested_filename.replace(".epub", "")
         file_name = f"{title} {author}.epub"
         path = os.path.join(DOWNLOAD_DIR, file_name)
@@ -195,15 +205,20 @@ def download_epub(page, novel_url, timeout=15_000): # timeout -> 1000 = 1s
         return True
     except Exception as e:
         try:
-            print(f"$$$$AUTO$$$$$ AUTO FAILED (no download): {novel_url} - {e} $$$$$AUTO$$$$")
+            print(
+                f"$$$$AUTO$$$$$ AUTO FAILED (no download): {novel_url} - {e} $$$$$AUTO$$$$"
+            )
             ERRORS.append(str(e))
             print(" \n\n ---> manual download\n")
             worked = manual_download(page, novel_url)
             return worked
         except Exception as ex:
-            print(f"$$$MANUAL$$$$$$ MANUAL FAILED (no download): {novel_url} - {ex} $$$$MANUAL$$$$$")
+            print(
+                f"$$$MANUAL$$$$$$ MANUAL FAILED (no download): {novel_url} - {ex} $$$$MANUAL$$$$$"
+            )
             ERRORS.append(str(ex))
             return False
+
 
 def download_all_epubs(page, titles):
     failed = []
@@ -224,6 +239,7 @@ def download_all_epubs(page, titles):
     with open("ERRORS_3.json", "w") as file:
         json.dump(ERRORS, file)
 
+
 def manual_download(page, title):
     """
     Manually download a novel by scraping chapters from a select dropdown.
@@ -231,56 +247,58 @@ def manual_download(page, title):
     downloads each chapter individually and saves them as separate files,
     plus saves all chapters combined as a single novel file.
     """
-    #global COUNTER
+    # global COUNTER
     try:
         # Load the page
         page.goto(title, wait_until="domcontentloaded")
-        
+
         # Check if the chapter select element exists
         chapter_select = page.locator('select.textbox[name="chapter"]')
-        
+
         # Get all option values from the select
-        options = chapter_select.locator('option')
+        options = chapter_select.locator("option")
         option_count = options.count()
-        
+
         # Extract novel title from div.pagetitle: novel name (viewstory.php link) + author (viewuser.php link)
-        pagetitle = page.locator('#pagetitle')
+        pagetitle = page.locator("#pagetitle")
         novel_name = pagetitle.locator('a[href*="viewstory.php?sid="]').inner_text()
         author = pagetitle.locator('a[href*="viewuser.php?uid="]').inner_text()
         novel_title = f"{novel_name} - {author}"
         # Clean title for filename
-        novel_title = "".join(c for c in novel_title if c.isalnum() or c in (' ', '-', '_')).strip()
+        novel_title = "".join(
+            c for c in novel_title if c.isalnum() or c in (" ", "-", "_")
+        ).strip()
 
-        #COUNTER = COUNTER + 1
-        #novel_title = f"{COUNTER} {novel_title}"
+        # COUNTER = COUNTER + 1
+        # novel_title = f"{COUNTER} {novel_title}"
         # Create directory for this novel's chapters
         novel_dir = os.path.join(TG_MANUAL_DOWNLOAD, novel_title)
         os.makedirs(novel_dir, exist_ok=True)
-        
+
         # If no chapters found in select, download the current page's story content
         if option_count == 0:
             print(f"No chapters found in select for: {title}")
             print("Downloading single-page story content...")
-            
+
             try:
                 # Wait for the story content to load
-                story_div = page.locator('#story')
-                story_div.wait_for(state='visible', timeout=10000)
+                story_div = page.locator("#story")
+                story_div.wait_for(state="visible", timeout=10000)
                 page.wait_for_timeout(1000)
-                
+
                 # Extract text content from div#story
                 story_content = story_div.inner_text()
-                
+
                 if story_content:
                     # Save as a single file
                     filename = f"{novel_title}.txt"
                     file_path = os.path.join(novel_dir, filename)
-                    
-                    with open(file_path, 'w', encoding='utf-8') as f:
+
+                    with open(file_path, "w", encoding="utf-8") as f:
                         f.write(f"{novel_title}\n")
-                        f.write(f"{'='*80}\n\n")
+                        f.write(f"{'=' * 80}\n\n")
                         f.write(story_content)
-                    
+
                     print(f"Saved story: {filename}")
                     return True
                 else:
@@ -289,105 +307,108 @@ def manual_download(page, title):
             except Exception as e:
                 print(f"Error extracting story content: {e}")
                 return False
-        
+
         print(f"Found {option_count} chapters for: {title}")
-        
+
         all_chapters_content = []
-        
+
         # Iterate through each chapter option
         for i in range(option_count):
             option = options.nth(i)
-            chapter_value = option.get_attribute('value')
+            chapter_value = option.get_attribute("value")
             chapter_text = option.inner_text()
-            
+
             if not chapter_value:
                 continue
-            
-            print(f"Downloading chapter {i+1}/{option_count}: {chapter_text}")
-            
+
+            print(f"Downloading chapter {i + 1}/{option_count}: {chapter_text}")
+
             # Select the chapter option
             chapter_select.select_option(chapter_value)
-            
+
             # Wait for the story content to load/update
             try:
-                story_div = page.locator('#story')
-                story_div.wait_for(state='visible', timeout=10000)
+                story_div = page.locator("#story")
+                story_div.wait_for(state="visible", timeout=10000)
                 # Small delay to ensure content is fully loaded
                 page.wait_for_timeout(1000)
             except Exception as e:
-                print(f"Warning: Could not wait for story div for chapter {i+1}: {e}")
+                print(f"Warning: Could not wait for story div for chapter {i + 1}: {e}")
                 continue
-            
+
             # Extract text content from div#story
             try:
-                story_content = page.locator('#story').inner_text()
-                
+                story_content = page.locator("#story").inner_text()
+
                 if story_content:
                     # Save individual chapter file
-                    chapter_filename = f"Chapter_{i+1:04d}_{chapter_text}.txt"
+                    chapter_filename = f"Chapter_{i + 1:04d}_{chapter_text}.txt"
                     # Clean filename
-                    chapter_filename = "".join(c for c in chapter_filename if c.isalnum() or c in (' ', '-', '_', '.')).strip()
+                    chapter_filename = "".join(
+                        c
+                        for c in chapter_filename
+                        if c.isalnum() or c in (" ", "-", "_", ".")
+                    ).strip()
                     chapter_path = os.path.join(novel_dir, chapter_filename)
-                    
-                    with open(chapter_path, 'w', encoding='utf-8') as f:
+
+                    with open(chapter_path, "w", encoding="utf-8") as f:
                         f.write(f"{chapter_text}\n\n")
                         f.write(story_content)
-                    
+
                     # Add to combined content
-                    all_chapters_content.append(f"\n\n{'='*80}\n")
-                    all_chapters_content.append(f"Chapter {i+1}: {chapter_text}\n")
-                    all_chapters_content.append(f"{'='*80}\n\n")
+                    all_chapters_content.append(f"\n\n{'=' * 80}\n")
+                    all_chapters_content.append(f"Chapter {i + 1}: {chapter_text}\n")
+                    all_chapters_content.append(f"{'=' * 80}\n\n")
                     all_chapters_content.append(story_content)
-                    
+
                     print(f"  Saved: {chapter_filename}")
                 else:
-                    print(f"  Warning: Empty content for chapter {i+1}")
+                    print(f"  Warning: Empty content for chapter {i + 1}")
             except Exception as e:
-                print(f"  Error extracting content for chapter {i+1}: {e}")
+                print(f"  Error extracting content for chapter {i + 1}: {e}")
                 continue
-        
+
         # Save combined novel file
         if all_chapters_content:
             combined_filename = f"{novel_title}_Complete.txt"
             combined_path = os.path.join(novel_dir, combined_filename)
-            
-            with open(combined_path, 'w', encoding='utf-8') as f:
+
+            with open(combined_path, "w", encoding="utf-8") as f:
                 f.write(f"{novel_title}\n")
-                f.write(f"{'='*80}\n\n")
+                f.write(f"{'=' * 80}\n\n")
                 f.write("".join(all_chapters_content))
-            
+
             print(f"\nSaved complete novel: {combined_filename}")
             print(f"Total chapters downloaded: {len(all_chapters_content) // 4}\n")
             return True
         else:
             print(f"No content was downloaded for: {title}")
             return False
-            
+
     except Exception as e:
         print(f"$$$$$$$$$ FAILED (manual download): {title} - {e} $$$$$$$$$")
         ERRORS.append(str(e))
         return False
 
+
 def run():
     with sync_playwright() as p:
         # Launch browser (headless=True for invisible browser)
-        #browser = p.chromium.launch(headless=False)
+        # browser = p.chromium.launch(headless=False)
         browser = p.firefox.launch(headless=False)
 
         # Create a new context with a download directory
-        context = browser.new_context(
-            accept_downloads=True
-        )
+        context = browser.new_context(accept_downloads=True)
         page = context.new_page()
         login(page)
         start = time.time()
 
-        #titles = get_novel_urls(page)
-        #download_all_epubs(page, titles)
+        # titles = get_novel_urls(page)
+        # download_all_epubs(page, titles)
         manual_download(page, "https://tgstorytime.com/viewstory.php?sid=9052")
 
         end = time.time()
-        total_min = (end - start)/60
+        total_min = (end - start) / 60
         print(f"\n\n\nTime taken: {int(total_min)} minutes")
 
         browser.close()
@@ -395,8 +416,7 @@ def run():
 
 if __name__ == "__main__":
     print("\n----------------- START ----------------------")
-    #count_novels()
+    # count_novels()
     run()
 
-    
-    #find_empty_epubs("V:\TG_STORY_TIME_2nd_Run")
+    # find_empty_epubs("V:\TG_STORY_TIME_2nd_Run")
