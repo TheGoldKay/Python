@@ -1,4 +1,5 @@
 from playwright.sync_api import sync_playwright
+from ebooklib import epub
 from pathlib import Path
 import os
 import json
@@ -240,6 +241,23 @@ def download_all_epubs(page, titles):
         json.dump(ERRORS, file)
 
 
+def chapter_text_to_html(chapter_title: str, text: str) -> str:
+    # Split on blank lines into paragraphs
+    paragraphs = [p.strip() for p in text.split("\n\n") if p.strip()]
+
+    body_html = "\n".join(f"<p>{p}</p>" for p in paragraphs)
+
+    return f"""<html>
+  <head>
+    <title>{chapter_title}</title>
+  </head>
+  <body>
+    <h2>{chapter_title}</h2>
+    {body_html}
+  </body>
+</html>"""
+
+
 def manual_download(page, title):
     """
     Manually download a novel by scraping chapters from a select dropdown.
@@ -311,6 +329,7 @@ def manual_download(page, title):
         print(f"Found {option_count} chapters for: {title}")
 
         all_chapters_content = []
+        epub_chapters = []
 
         # Iterate through each chapter option
         for i in range(option_count):
@@ -318,12 +337,19 @@ def manual_download(page, title):
             chapter_value = option.get_attribute("value")
             chapter_text = option.inner_text()
 
+            while not chapter_text[0].isalpha(): # take the chapter number from the front (otherwise it will be numbered twice)
+                chapter_text = chapter_text[1:]
+
             if not chapter_value:
                 continue
 
             print(f"Downloading chapter {i + 1}/{option_count}: {chapter_text}")
 
             # Select the chapter option
+            # Triggers whatever onchange / form behavior the site has wired to the chapters' dropdown.
+            # * Submits the form and reloads the page with the new chapter,
+            # OR
+            # * Updates the #story content via JavaScript without a full reload.
             chapter_select.select_option(chapter_value)
 
             # Wait for the story content to load/update
@@ -342,7 +368,7 @@ def manual_download(page, title):
 
                 if story_content:
                     # Save individual chapter file
-                    chapter_filename = f"Chapter_{i + 1:04d}_{chapter_text}.txt"
+                    chapter_filename = f"{chapter_text}.txt"  # Chapter_{i + 1:04d}_
                     # Clean filename
                     chapter_filename = "".join(
                         c
@@ -360,6 +386,8 @@ def manual_download(page, title):
                     all_chapters_content.append(f"Chapter {i + 1}: {chapter_text}\n")
                     all_chapters_content.append(f"{'=' * 80}\n\n")
                     all_chapters_content.append(story_content)
+                    # epub
+                    epub_chapters.append((chapter_text, story_content))
 
                     print(f"  Saved: {chapter_filename}")
                 else:
@@ -368,18 +396,79 @@ def manual_download(page, title):
                 print(f"  Error extracting content for chapter {i + 1}: {e}")
                 continue
 
-        # Save combined novel file
-        if all_chapters_content:
+        # Save combined novel file (txt) + EPUB
+        if epub_chapters:
+            # 1) Optional: keep your existing combined .txt file
             combined_filename = f"{novel_title}_Complete.txt"
             combined_path = os.path.join(novel_dir, combined_filename)
-
             with open(combined_path, "w", encoding="utf-8") as f:
                 f.write(f"{novel_title}\n")
                 f.write(f"{'=' * 80}\n\n")
                 f.write("".join(all_chapters_content))
+            print(f"\nSaved complete novel text: {combined_filename}")
 
-            print(f"\nSaved complete novel: {combined_filename}")
-            print(f"Total chapters downloaded: {len(all_chapters_content) // 4}\n")
+            # 2) Build EPUB
+            book = epub.EpubBook()
+            book.set_identifier(novel_title)
+            book.set_title(novel_title)
+            book.add_author(author)
+
+            # Basic stylesheet for “proper” ebook look
+            style = """
+            body {
+                font-family: "Georgia", "Times New Roman", serif;
+                line-height: 1.5;
+                margin: 1em;
+            }
+            h1, h2 {
+                text-align: center;
+                margin: 1em 0;
+            }
+            p {
+                text-indent: 1.2em;
+                margin: 0 0 0.6em 0;
+            }
+            """
+
+            nav_css = epub.EpubItem(
+                uid="style_nav",
+                file_name="style/nav.css",
+                media_type="text/css",
+                content=style,
+            )
+            book.add_item(nav_css)
+
+            spine_items = ["nav"]
+            toc_items = []
+
+            for idx, (chapter_title, chapter_text) in enumerate(epub_chapters, start=1):
+                html_content = chapter_text_to_html(chapter_title, chapter_text)
+                chap = epub.EpubHtml(
+                    title=chapter_title,
+                    file_name=f"chap_{idx:04d}.xhtml",
+                    lang="en",
+                )
+                chap.content = html_content
+                # Attach stylesheet
+                chap.add_item(nav_css)
+
+                book.add_item(chap)
+                spine_items.append(chap)
+                toc_items.append(chap)
+
+            book.toc = tuple(toc_items)
+            book.spine = spine_items
+
+            # Required navigation files
+            book.add_item(epub.EpubNcx())
+            book.add_item(epub.EpubNav())
+
+            epub_filename = f"{novel_title}.epub"
+            epub_path = os.path.join(novel_dir, epub_filename)
+            epub.write_epub(epub_path, book, {})
+
+            print(f"Saved EPUB: {epub_filename}")
+            print(f"Total chapters downloaded: {len(epub_chapters)}\n")
             return True
         else:
             print(f"No content was downloaded for: {title}")
